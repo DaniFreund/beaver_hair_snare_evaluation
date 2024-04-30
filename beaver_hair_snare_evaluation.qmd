@@ -1,0 +1,1076 @@
+---
+title: "Evaluation of placement, efficiency, and animal behavioral response of non-invasive hair traps for wild North American beavers (Castor canadensis)"
+author: "Dani Freund"
+format: html
+editor: visual
+theme: lux
+---
+
+### Loading Packages
+
+```{r, warning=FALSE, message = FALSE}
+library(googledrive) # for downloading google files
+library(lubridate) # for dates
+library(dplyr) # for mutate function
+library(ggplot2) # for graphing
+library(tidyverse) # for pivoting longer
+```
+
+### Downloading Data
+
+```{r, warning=FALSE, message = FALSE}
+# DOWNLOADING DATA FROM GOOGLE DRIVE
+
+# sometimes need this to authorize access to my google drive account
+drive_deauth()
+
+file.download <- function(ID){
+  file_id <- ID
+  temp_file <- tempfile(fileext = ".csv") # creating a temporary file with .csv
+  file <- drive_download(as_id(file_id),  path = temp_file)
+  read.csv(temp_file)
+}
+
+# snare_check <- file.download()
+# snare_database <- file.download()
+# hair <- file.download()
+# videos <- file.download()
+```
+
+```{r, message = FALSE, warning = FALSE, echo = FALSE}
+snare_check <- file.download("13y63rO3Ulgi6lIv8agmdr2TLiHivCIyXHZ2fzExVib4")
+snare_database <- file.download("11B2DPy_tgxbewSsmIhCvHV-2CB-7ZtyaH-02pLjuruo")
+hair <- file.download("18SfvXeXoHP0gHIEC_Gm6JmN5o1mUgU8fxwtqbGuk2s8")
+videos <- file.download("1eu4bubab8yKacRGzHgWQj6uJbg8rKjz06yKpkZybq9E")
+```
+
+### Converting Dates and Times to Usable Format
+
+```{r, warning=FALSE, message = FALSE}
+# SNARE DATABASE
+snare_database$date.deployed <- as.Date(snare_database$date.deployed,format = "%m-%d-%Y")
+snare_database$date.collected <- as.Date(snare_database$date.collected,format = "%m-%d-%Y")
+snare_database$date.trail.camera.deployed <- as.Date(snare_database$date.trail.camera.deployed,format = "%m-%d-%Y")
+snare_database$date.trail.camera.collected <- as.Date(snare_database$date.trail.camera.collected,format = "%m-%d-%Y")
+
+# SNARE CHECK
+snare_check$date.checked <- as.Date(snare_check$date.checked,format = "%m-%d-%Y")
+
+# VIDEOS
+# combining date and time column
+videos$date.time.video.recorded <- paste(videos$date.video.recorded, videos$time.24.hour)
+videos$date.time.video.recorded <- as.POSIXct(videos$date.time.video.recorded, format="%m-%d-%Y %H:%M:%S")
+
+videos$date.video.recorded <- as.Date(videos$date.video.recorded, format = "%m-%d-%Y")
+videos$date.sd.card.collected <- as.Date(videos$date.sd.card.collected, format = "%m-%d-%Y")
+videos$time.24.hour <- as.POSIXct(videos$time.24.hour, format = "%H:%M:%S") # this converts the time but gives it an arbitrary date attached 
+
+# ordering data
+videos <- videos[order(videos$hair.snare.id, videos$date.time.video.recorded), ]
+# seperating duplicates by this function
+funct <- function(data){
+  data %>%
+  group_by(hair.snare.id) %>%
+  mutate(
+    date.time.video.recorded = if_else(
+      duplicated(date.time.video.recorded) & 
+        date.time.video.recorded == lag(date.time.video.recorded),
+      as.POSIXct(date.time.video.recorded) + seconds(1),
+      date.time.video.recorded
+    )
+  ) %>%
+  ungroup()
+}
+
+# running the function four times to get rid of all duplicates
+for (i in 1:4) {
+  videos <- funct(videos)
+}
+
+# checking that it worked
+videos %>% 
+  group_by(hair.snare.id, date.time.video.recorded) %>% 
+  summarize(n=n()) %>% filter(n !=1)
+
+
+# HAIR
+hair$date.collected.for.samples <- as.Date(hair$date.collected.for.samples, format = "%m-%d-%Y")
+hair$date.collected <- hair$date.collected.for.samples
+#hair$date.collected.for.samples <- as.POSIXct(hair$date.collected.for.samples, format="%m-%d-%Y") 
+
+# CREATING YEAR COLUMNS
+# creating the column
+snare_database$year <- year(snare_database$date.deployed)
+snare_check$year <- year(snare_check$date.checked)
+hair$year <- year(hair$date.collected.for.samples)
+
+# summarizing number of snares deployed each year
+snare_database %>% group_by(year) %>% summarize(n=n())
+snare_database %>% group_by(pond.id) %>% summarize(n=n())
+snare_database %>% group_by(pond.id, year) %>% summarize(n=n())
+```
+
+### Summarizing Hair Snares
+
+##### Days each snare was deployed
+
+```{r, warning=FALSE, message = FALSE}
+# removing spaces
+snare_database$hair.snare.id <- gsub(" ", "", snare_database$hair.snare.id)
+
+# creating a column for number of days each snare was deployed
+snare_database$number.of.days.deployed <- as.numeric(difftime(snare_database$date.collected, snare_database$date.deployed, units = "days"))
+
+# calculating first and last date snares were deployed for each year 
+snare_database %>% 
+  subset(!(hair.snare.id == "snare_01" |
+           hair.snare.id == "snare_02" |
+           hair.snare.id =="snare_03" |
+           hair.snare.id =="snare_59")) %>%
+  group_by(year) %>% summarize(first_date = min(date.deployed), last_date = max(date.collected))
+
+# calculating average number of days snares deployed 
+# don't want to include pilot snares 1, 2, and 3 but 3_b is alright
+snare_database %>% 
+  subset(!(hair.snare.id == c("snare_01","snare_02","snare_03","snare_59"))) %>% 
+  group_by(year) %>% 
+  summarize(average.days.deployed = mean(number.of.days.deployed), 
+            sd = sd(number.of.days.deployed))
+```
+
+##### How often snares were checked
+
+```{r, warning=FALSE, message = FALSE}
+# arranging data so that it's in order for each hair.snare.id and in chronological order
+snare_check <- snare_check %>% arrange(hair.snare.id, date.checked)
+
+# Calculate the number of days between each check for each trap
+snare_check <- snare_check %>% 
+  group_by(hair.snare.id) %>%
+  mutate(days.between.checks = c(0, diff(date.checked))) %>%
+  ungroup()
+
+# figuring out average number of days between hair snare checks for each year
+snare_check %>% 
+  subset(!(hair.snare.id == c("snare_01","snare_02","snare_03","snare_59"))) %>% 
+  group_by(year) %>% summarize(mean = mean(days.between.checks),
+                               median = median(days.between.checks),
+                               sd = sd(days.between.checks))
+```
+
+##### Beaver features snares were deployed on
+
+```{r}
+snare_database %>% group_by(beaver.feature) %>% summarize(n=n())
+```
+
+### Summarizing Cameras
+
+##### Days cameras were deployed at each snare
+
+```{r, warning=FALSE, message = FALSE}
+# creating a column for number of days each trail camera was deployed
+snare_database$number.of.days.camera.deployed <- as.numeric(difftime(snare_database$date.trail.camera.collected, snare_database$date.trail.camera.deployed, units = "days"))
+
+# editing snares that had cameras deployed twice (snare_44 and snare_43)
+snare_database$number.of.days.camera.deployed <- ifelse(snare_database$snare == "snare_43",50,snare_database$number.of.days.camera.deployed)
+snare_database$number.of.days.camera.deployed <- ifelse(snare_database$snare == "snare_44",29,snare_database$number.of.days.camera.deployed)
+
+# converting column to numeric
+snare_database$number.of.days.camera.deployed <- as.numeric(snare_database$number.of.days.camera.deployed)
+
+# creating column for if snare had camera or not
+snare_database$camera <- ifelse(is.na(snare_database$number.of.days.camera.deployed), 0, 1)
+
+# summarising number of snares that had cameras each year
+snare_database %>%
+  subset(hair.snare.id != c("snare_01","snare_02","snare_03","snare_59")) %>% 
+  group_by(camera, year) %>% summarize(n=n())
+
+# percent of time camera covered snare: number of days camera deployed / number of days snare deployed
+snare_database$days.camera.per.days.snare.deployed <- snare_database$number.of.days.camera.deployed/snare_database$number.of.days.deployed
+
+# calculating average percent of days cameras were on each snare out of the number of days each snare was deployed
+snare_database %>% 
+  subset(hair.snare.id != c("snare_01","snare_02","snare_03","snare_59")) %>%
+  group_by(year) %>% 
+  summarize(average.percent.camera.days.deployed = 
+              mean(days.camera.per.days.snare.deployed, na.rm = TRUE), 
+            sd = sd(days.camera.per.days.snare.deployed, na.rm = TRUE))
+```
+
+### Remote Camera Videos
+
+##### Videos captured per snare per day
+
+```{r, warning=FALSE, message = FALSE}
+# calculating total number of videos recorded per snare
+n.videos <- videos %>% group_by(hair.snare.id) %>% summarize(n_videos = n())
+colnames(n.videos) <- c("hair.snare.id","n_videos")
+
+# adding column to snare_database
+snare_database <- merge(snare_database, n.videos, by = "hair.snare.id", all=TRUE)
+
+# average number of videos caught per snare out of the total days cameras were deployed 
+snare_database$videos.taken.per.day <- snare_database$n_videos/snare_database$number.of.days.camera.deployed
+```
+
+##### Species captured in videos
+
+```{r, warning=FALSE, message = FALSE}
+# removing spaces from species column
+videos$main.species <- gsub(" ", "", videos$main.species)
+
+# figuring out species captured in videos
+n.species.videos <- videos %>% group_by(main.species) %>% summarize(n=n())
+sum(n.species.videos$n) 
+
+# total videos in them with beavers as the main species
+subset(videos, videos$main.species == "beaver") %>% summarize(n=n())
+
+# total videos in them with beavers as the secondary species
+subset(videos, videos$secondary.species == "beaver") %>% summarize(n=n())
+
+# number of videos of beavers per snare
+n.videos.beavers <- subset(videos, videos$main.species == "beaver" |
+         videos$secondary.species == "beaver") %>% group_by(hair.snare.id) %>% summarize(n.videos.beavers = n())
+
+# adding column to snare_databasae
+colnames(n.videos.beavers) <- c("hair.snare.id", "n.videos.beavers")
+snare_database <- merge(snare_database, n.videos.beavers, by = "hair.snare.id", all = TRUE)
+
+# calculating number of videos of beavers taken per all videos taken for each snare
+snare_database$n.videos.beavers.per.video <- snare_database$n.videos.beavers/snare_database$n_videos
+
+snare_database %>% 
+  subset(hair.snare.id != c("snare_01","snare_02","snare_03","snare_59")) %>%
+  group_by(year) %>% 
+  summarize(mean = mean(n.videos.beavers.per.video, na.rm=TRUE), sd = sd(n.videos.beavers.per.video, na.rm=TRUE))
+```
+
+##### Times all species snagged snare
+
+```{r, warning=FALSE, message = FALSE}
+# replacing unk with NAs
+videos$snag.snare <- ifelse(videos$snag.snare == "unk", NA, videos$snag.snare)
+
+# total number of times snare was snagged
+total.snags <- subset(videos, videos$snag.snare == 1) %>% group_by(hair.snare.id) %>% summarize(total.snags=n())
+
+# adding to snare_database
+colnames(total.snags) <- c("hair.snare.id","total.snags")
+snare_database <- merge(snare_database, total.snags, by= "hair.snare.id", all=TRUE)
+
+# number of snags per number of days camera deployed
+snare_database$snags.per.camera.days <- snare_database$total.snags / snare_database$number.of.days.camera.deployed
+
+# finding average number of snags per number of days camera deployed
+mean(snare_database$snags.per.camera.days, na.rm=TRUE)
+sd(snare_database$snags.per.camera.days, na.rm=TRUE)
+```
+
+##### Times beavers snagged snare
+
+```{r, warning=FALSE, message = FALSE}
+# figuring out number of times beaver snagged snare
+subset(videos, videos$main.species == "beaver") %>% 
+  group_by(snag.snare) %>% 
+  summarize(n=n())
+
+# number of times beavers snagged each snare
+beaver_snag <- subset(videos, videos$main.species == "beaver" &
+         videos$snag.snare == 1) %>% group_by(hair.snare.id) %>% summarize(beaver_snag = n())
+# adding to snare_database
+colnames(beaver_snag) <- c("hair.snare.id","n.beaver.snag")
+snare_database <- merge(snare_database, beaver_snag, by = "hair.snare.id", all = TRUE)
+
+# finding percent beavers snagged snare 
+snare_database$percent.beaver.snag <- (snare_database$n.beaver.snag) / (snare_database$total.snags)
+
+mean(snare_database$percent.beaver.snag, na.rm = TRUE)
+sd(snare_database$percent.beaver.snag, na.rm = TRUE)
+```
+
+##### Times other animals snagged snare
+
+###### Muskrat
+
+```{r, warning=FALSE, message = FALSE}
+# MUSKRATS
+# number of times beavers snagged each snare
+muskrat_snag <- subset(videos, videos$main.species == "muskrat" &
+         videos$snag.snare == 1) %>% group_by(hair.snare.id) %>% summarize(muskrat_snag = n())
+# adding to snare_database
+colnames(muskrat_snag) <- c("hair.snare.id","n.muskrat.snag")
+snare_database <- merge(snare_database, muskrat_snag, by = "hair.snare.id", all = TRUE)
+
+# finding percent muskrat snagged snare 
+snare_database$percent.muskrat.snag <- round(snare_database$n.muskrat.snag / snare_database$total.snags,2)
+mean(snare_database$percent.muskrat.snag, na.rm = TRUE)
+sd(snare_database$percent.muskrat.snag, na.rm = TRUE)
+```
+
+###### Otter
+
+```{r, warning=FALSE, message = FALSE}
+# OTTER
+# number of times beavers snagged each snare
+otter_snag <- subset(videos, videos$main.species == "otter" &
+         videos$snag.snare == 1) %>% group_by(hair.snare.id) %>% summarize(otter_snag = n())
+# adding to snare_database
+snare_database <- merge(snare_database, otter_snag, by = "hair.snare.id", all = TRUE)
+
+# finding percent otters snagged snare 
+snare_database$percent.otter.snag <- round(snare_database$otter_snag / snare_database$total.snags,2)
+mean(snare_database$percent.otter.snag, na.rm = TRUE)
+sd(snare_database$percent.otter.snag, na.rm = TRUE)
+```
+
+###### Fisher
+
+```{r, warning=FALSE, message = FALSE}
+# FISHER
+# number of times beavers snagged each snare
+fisher_snag <- subset(videos, videos$main.species == "fisher" &
+         videos$snag.snare == 1) %>% group_by(hair.snare.id) %>% summarize(fisher_snag = n())
+# adding to snare_database
+snare_database <- merge(snare_database, fisher_snag, by = "hair.snare.id", all = TRUE)
+
+# finding percent beavers snagged snare 
+snare_database$percent.fisher.snag <- round(snare_database$fisher_snag / snare_database$total.snags,2)
+mean(snare_database$percent.fisher.snag, na.rm = TRUE)
+sd(snare_database$percent.fisher.snag, na.rm = TRUE)
+```
+
+###### All Weasels (labeled as pine marten in code)
+
+```{r, warning=FALSE, message = FALSE}
+# PINE MARTEN THIS WILL BE ACTUALLY FOR ALL WEASELS
+# number of times beavers snagged each snare
+pinemarten_snag <- subset(videos, videos$main.species == "pinemarten" |
+                            videos$main.species == "unkweasel" |
+                            videos$main.species == "ermine" |
+                            videos$main.species == "unkmustelid" |
+                            videos$main.species == "longtailedweasel" |
+                            videos$main.species == "shorttailedweasel" &
+         videos$snag.snare == 1) %>% group_by(hair.snare.id) %>% summarize(pinemarten_snag = n())
+# adding to snare_database
+colnames(pinemarten_snag) <- c("hair.snare.id","n.pinemarten.snag")
+snare_database <- merge(snare_database, pinemarten_snag, by = "hair.snare.id", all = TRUE)
+
+# finding percent all weasels snagged snare 
+snare_database$percent.pinemarten.snag <- round(snare_database$n.pinemarten.snag / snare_database$total.snags,2)
+mean(snare_database$percent.pinemarten.snag, na.rm = TRUE)
+sd(snare_database$percent.pinemarten.snag, na.rm = TRUE)
+```
+
+##### Graphing number of times animals captured snagging snares in videos
+
+```{r, warning=FALSE, message = FALSE}
+# getting rid of spaces in main species column
+videos$main.species <- gsub(" ", "", videos$main.species)
+
+# creating column indicating if similar species to beaver were recorded in videos
+videos <- videos %>%
+  mutate(similar.species = 
+           ifelse(main.species == "beaver"| 
+                  main.species == "fisher"| 
+                  main.species == "muskrat"| 
+                  main.species == "otter"| 
+                  main.species == "pinemarten"| 
+                  main.species == "unkweasel"|
+                  main.species == "ermine"|
+                  main.species == "unkmustelid"|
+                  main.species == "longtailedweasel"| 
+                  main.species == "americanmink"| 
+                  main.species == "shorttailedweasel",main.species,"Other Species"
+  ))
+
+# collapsing all weasel species into "weasels"
+videos$similar.species =  ifelse((videos$similar.species == "pinemarten"|
+                                 videos$similar.species =="unkweasel"|
+                                 videos$similar.species =="ermine"|
+                                 videos$similar.species =="unkmustelid"|
+                                 videos$similar.species =="longtailedweasel"|
+                                 videos$similar.species =="shorttailedweasel"), 
+                                           "weasels", videos$similar.species)
+
+# renaming species so they look nicer in graph
+videos$similar.species[videos$similar.species == "beaver"] <- "Beaver"
+videos$similar.species[videos$similar.species == "americanmink"] <- "Mink"
+videos$similar.species[videos$similar.species == "fisher"] <- "Fisher"
+videos$similar.species[videos$similar.species == "muskrat"] <- "Muskrat"
+videos$similar.species[videos$similar.species == "otter"] <- "Otter"
+videos$similar.species[videos$similar.species == "mink"] <- "Mink"
+videos$similar.species[videos$similar.species == "weasels"] <- "Other Weasels"
+
+# getting rid of snare_ before snare ID so that it looks better in the graph
+videos$snare_number <- sub("^snare_", "", videos$hair.snare.id)
+# replacing snare 03_b with snare 58 to make labels easier to read
+videos$snare_number <- ifelse(videos$snare_number == "03_b", "60",videos$snare_number)
+# converting snare_number to a factor so it isn't read as an integer by ggplot
+videos$snare_number<- as.factor(videos$snare_number)
+
+# graphing counts 
+subset(videos, videos$snag.snare == 1) %>% ggplot(aes(x=snare_number, fill = similar.species)) + geom_bar() +
+  xlab("Snare ID") +  # Change X-axis title
+  ylab("Percent of instances animals snagged snare") +
+   labs(fill = "Species") 
+
+# graphing percentages
+subset(videos, videos$snag.snare == 1) %>% 
+  ggplot(aes(x=snare_number, fill = similar.species)) + 
+  geom_bar(position="fill") +
+  xlab("Snare ID") +  # Change X-axis title
+  ylab("Percent of instances animals snagged snare") +
+   labs(fill = "Species") +
+  theme_classic() +
+  scale_y_continuous(expand = c(0, 0)) +
+  theme(axis.text.x = element_text(size = 12),  # Adjust x-axis text size
+        axis.text.y = element_text(size = 12),  # Adjust y-axis text size
+        axis.title.x = element_text(size = 14), # Adjust x-axis label size
+        axis.title.y = element_text(size = 14))
+```
+
+##### Times beavers went over, under, side of snare
+
+```{r, warning=FALSE, message = FALSE}
+# getting rid of spaces in data
+videos$over.under.side.of.snare<- gsub(" ", "", videos$over.under.side.of.snare)
+
+# summing over side and under
+side.of.snare <- subset(videos, videos$main.species == "beaver" & over.under.side.of.snare != "na") %>% group_by(over.under.side.of.snare) %>% summarise(n=n())
+
+# seperating side of body column into seperate columns
+side.of.snare <- separate(side.of.snare, over.under.side.of.snare, into = paste("body", 1:3, sep="_"), sep = "\\.")
+
+# figuring out total times beaver touched over, under, or side of snare. If beaver did more than one that was counted twice (once for side and once for over for example)
+side.of.snare.sum <- side.of.snare %>%
+  pivot_longer(cols = c(body_1, body_2, body_3), names_to = "body_part", values_to = "side.of.snare") %>% group_by(side.of.snare) %>%
+  summarize(total_samples = sum(n, na.rm = TRUE)) 
+
+# finding percent not including NAs
+side.of.snare.sum$percent <- round(side.of.snare.sum$total_samples / (sum(side.of.snare.sum$total_samples[1:4])),2)
+```
+
+##### Times each body part was snagged
+
+```{r, warning=FALSE, message = FALSE}
+# figuring out number of times each part of a beavers body was snagged
+# converting columns to numeric
+videos$snout.sampled <- as.numeric(videos$snout.sampled)
+videos$head.sampled <- as.numeric(videos$head.sampled)
+videos$neck.sampled <- as.numeric(videos$neck.sampled)
+videos$back.sampled <- as.numeric(videos$back.sampled)
+videos$side.sampled <- as.numeric(videos$side.sampled)
+videos$belly.sampled <- as.numeric(videos$belly.sampled)
+videos$legs.sampled <- as.numeric(videos$legs.sampled)
+videos$rump.sampled <- as.numeric(videos$rump.sampled)
+videos$tail.sampled <- as.numeric(videos$tail.sampled)
+
+# subsetting data
+videos.beaver <- subset(videos, videos$main.species == "beaver")
+
+# summing number of times each body part was snagged for beavers
+beaver.body.snag <- videos.beaver %>% group_by(hair.snare.id) %>% 
+  summarise(snout = sum(snout.sampled),
+            head = sum(head.sampled),
+            neck = sum(neck.sampled),
+            back = sum(back.sampled),
+            side = sum(side.sampled),
+            belly = sum(belly.sampled),
+            legs = sum(legs.sampled),
+            rump = sum(rump.sampled),
+            tail = sum(tail.sampled))
+
+# pivoting longer
+beaver.body.snag <- pivot_longer(beaver.body.snag, 
+                                 cols = -hair.snare.id, 
+                                 names_to = "body.part", 
+                                 values_to = "n.snagged")
+
+# grouping by body part
+beaver.body.snag$n.snagged <- as.numeric(beaver.body.snag$n.snagged)
+beaver.body.snag.sum <- beaver.body.snag %>% group_by(body.part) %>% summarize(sum=sum(n.snagged, na.rm = TRUE))
+
+# attaching percent
+beaver.body.snag.sum$percent <- round(beaver.body.snag.sum$sum / (sum(beaver.body.snag.sum$sum)), 2)
+```
+
+##### Times beavers investigated snare or got snagged on snare
+
+```{r, warning=FALSE, message = FALSE}
+# total number of videos that recorded beavers
+beaver <- subset(videos, videos$main.species == "beaver") %>% summarize(n=n())
+
+# total number of videos that recroded beavers investigating snare
+investigating <- videos %>% subset(main.species == "beaver") %>% subset(
+         main.behavior == "investigatingsnare" |
+           main.behavior == "investigatingcamera" |
+           main.behavior == "investigatingsnare.and.traveling") %>% summarize(n=n())
+
+subset(videos, videos$main.species == "beaver" & 
+         videos$main.behavior == "investigatingsnare") %>% summarize(n=n())
+
+# total number of videos that recorded beavers being influence by snare
+influence <- subset(videos, videos$main.species == "beaver" & 
+         videos$beaver.travel.inhibited.by.snare == 1) %>% summarize(n=n())
+
+# percent of all videos recorded of beavers where beavers were investigating snare
+investigating$n/beaver$n
+# percent of all videos recorded of beavers where beavers were influenced by snare
+influence$n/beaver$n
+```
+
+##### Times other animals snagged snare
+
+```{r, warning=FALSE, message = FALSE}
+# finding overall number of other species that snagges snare
+subset(videos, videos$main.species != "beaver" & videos$snag.snare == 1) %>% 
+  group_by(main.species) %>% summarize(n=n()) %>% 
+  mutate(percent.snag = n / sum(n))
+```
+
+### Hair
+
+##### Hair weight collected
+
+```{r, warning=FALSE, message = FALSE}
+# making column numeric
+hair$entire.sample.weight.mg <- as.numeric(hair$entire.sample.weight.mg)
+
+# figuring out number of samples collected
+n.samples<-subset(hair, hair$sample.type == "snare") %>% group_by(hair.snare.id) %>% summarize(n.samples=n())
+
+# summarising total samples collected
+sum(n.samples$n.samples)
+
+# adding number of samples collected to snare_database
+snare_database <- merge(snare_database, n.samples, by="hair.snare.id", all = TRUE)
+
+# figuring out number of samples collected per number of days each snare was deployed
+snare_database$sample.collection.rate <- snare_database$n.samples / snare_database$number.of.days.deployed
+
+# figuring out weight of samples collected per snare (more informative than number)
+hair.weight <- subset(hair, hair$sample.type == "snare" & !is.na(entire.sample.weight.mg)) %>%
+  group_by(hair.snare.id) %>% 
+  summarize(weight.of.all.samples.collected.mg = sum(entire.sample.weight.mg))
+
+# adding weight to the snare_database
+snare_database <- merge(snare_database, hair.weight, by="hair.snare.id", all=TRUE)
+
+# max and min of individual samples
+subset(hair, hair$sample.type == "snare" & !is.na(entire.sample.weight.mg))  %>% 
+  summarize(min = min(entire.sample.weight.mg), max=max(entire.sample.weight.mg))
+
+# figuring out weight of samples collected per number of days snare deployed
+snare_database$hair.weight.per.day <- round(snare_database$weight.of.all.samples.collected.mg/snare_database$number.of.days.deployed,2)
+
+# summarizing weight of sample collected per number of days snare deployed
+snare_database %>% summarize(mean = mean(hair.weight.per.day, na.rm=T), 
+                             sd=sd(hair.weight.per.day, na.rm=T), 
+                             min = min(hair.weight.per.day, na.rm=T), 
+                             max = max(hair.weight.per.day, na.rm=T))
+
+# turning entire sample weight into numeric just in case
+hair$entire.sample.weight.mg <- as.numeric(hair$entire.sample.weight.mg)
+
+# seeing if there is a trend between dirtiness of hair and weight
+subset(hair, hair$sample.type == "snare") %>% ggplot(aes(x=dirt.score, y=entire.sample.weight.mg)) + geom_point()
+
+# grouping data by dirt score
+subset(hair, hair$sample.type == "snare") %>% group_by(dirt.score) %>% summarize(n=n())
+```
+
+##### Dirtiness of hair
+
+```{r, warning=FALSE, message = FALSE}
+# finding average dirt score
+hair$dirt.score <- as.numeric(hair$dirt.score)
+subset(hair, hair$sample.type == "snare" & !is.na(dirt.score)) %>% 
+  summarise(mean = mean(dirt.score))
+
+# figuring out average dirtiness per hair snare
+mean.dirtiness <- subset(hair, hair$sample.type == "snare") %>% 
+  group_by(hair.snare.id) %>% 
+  summarize(mean.dirtiness = round(mean(dirt.score, na.rm = TRUE),2))
+
+# adding mean dirtiness to snare_database
+snare_database <- merge(snare_database, mean.dirtiness, by = "hair.snare.id", all=TRUE)
+
+# figuring out percentage of each dirt score in hair samples
+dirt.score <- subset(hair, hair$sample.type == "snare") %>% 
+  group_by(dirt.score) %>% summarize(n=n())
+dirt.score$percent <- round((dirt.score$n)/(sum(dirt.score$n)-2)*100,2)
+
+# linear model for dirt scores to see if sample weight is influenced by dirt score
+mod1 <- lm(entire.sample.weight.mg ~ dirt.score,
+   data = subset(hair, hair$sample.type == "snare"))
+summary(mod1)
+
+# figuring out if there are snares with no dirty samples
+hair.snare.zero <- hair %>% group_by(hair.snare.id) %>% summarize(mean.dirt = mean(dirt.score)) %>% mutate(no.dirt = ifelse(mean.dirt == 0, "yes", "no")) %>% filter(no.dirt == "yes")
+hair.snare.zero.id <- hair.snare.zero$hair.snare.id
+snare_database[snare_database$hair.snare.id %in% hair.snare.zero.id,]
+
+# creating dataset for hair samples with a score of 0 for dirtiness
+hair.zero <- hair %>% filter(sample.type == "snare" & dirt.score == 0)
+
+# max weight of individual samples with a dirt score of 0
+max(hair.zero$entire.sample.weight.mg)
+
+# figuring out weight of samples collected per number of days snare deployed for those with a dirt score of 0
+hair.zero.weight <- hair.zero %>% group_by(hair.snare.id) %>% summarize(clean.sample.weight = sum(entire.sample.weight.mg))
+# merging with snare_database
+snare_database <- merge(snare_database, hair.zero.weight, by = "hair.snare.id")
+# figuring out weight of clean samples collected per day snares deployed
+snare_database$clean.sample.weight.per.day <- snare_database$clean.sample.weight/snare_database$number.of.days.deployed
+
+# summarizing weight of sample collected per number of days snare deployed
+snare_database %>% summarize(mean = mean(clean.sample.weight.per.day, na.rm=T), 
+                             sd=sd(clean.sample.weight.per.day, na.rm=T), 
+                             min = min(clean.sample.weight.per.day, na.rm=T), 
+                             max = max(clean.sample.weight.per.day, na.rm=T))
+```
+
+### Merging video data and hair data based on dates that hair was collected
+
+##### Cleaning data
+
+```{r, warning=FALSE, message = FALSE}
+# removing times when snare was deployed
+snare_check.1 <- snare_check %>% filter(hair.on.snare != "date.deployed")
+
+# ADDING HAIR SAMPLE DATA TO SNARE CHECK DATA
+# picking columns for hair to make things easier
+hair_short <- hair %>% filter(sample.type == "snare") %>% 
+  select(sample.id, date.collected.for.samples, hair.snare.id, dirt.score, 
+         entire.sample.weight.mg,number.of.guard.hairs, follicle.present, year)
+# picking columns from snare_check that we need to make things easier
+snare_check_short <- snare_check %>% select(hair.snare.id, date.checked, sample.id, days.between.checks, animal.videos.recorded.on.camera)
+# re-naming columns to make them more easy to merge
+colnames(snare_check_short) <- c("hair.snare.id","date.collected.for.samples","sample.id","days.between.checks", "animal.videos.recorded.on.camera")
+
+# merging date check with hair samples collected
+# this dataset includes all times we checked snares, regardless of if there were videos recorded or not
+snare_check_new <- merge(hair_short, snare_check_short, by = 
+                    c("hair.snare.id","date.collected.for.samples","sample.id"), all=TRUE)
+```
+
+```{r, warning=FALSE, message = FALSE}
+# REFORMATTING DATA
+# adding column indicating if a sample was collected
+snare_check_new <- snare_check_new %>% mutate(sample.collected = ifelse(
+  sample.id != "na",1,0
+))
+
+# adding column to indicate if the sample was potentially recorded on video
+snare_check_new <- snare_check_new %>% mutate(sample.recorded.on.video = ifelse(
+  animal.videos.recorded.on.camera == 1 &
+    sample.collected == 1, 1, 0
+))
+
+# adding a column to the hair dataset that indicates the days since the snare was checked and when the hair was collected 
+snare_check_new <- snare_check_new %>% mutate(start.time.period.sample.and.videos = date.collected.for.samples - days.between.checks)
+
+# adding noon to the start time period to approximate when each new sampling period started
+snare_check_new$start.time.period.sample.and.videos <- paste(snare_check_new$start.time.period.sample.and.videos, "12:00")
+
+# adding 11:59 to the time each hair was collected to approximate when each snare was checked
+snare_check_new$date.collected.for.samples <-paste(snare_check_new$date.collected.for.samples, "11:59")
+
+# changing to date format
+snare_check_new$date.collected.for.samples <- 
+  ymd_hm(snare_check_new$date.collected.for.samples)
+snare_check_new$start.time.period.sample.and.videos <- 
+  ymd_hm(snare_check_new$start.time.period.sample.and.videos)
+```
+
+```{r, warning=FALSE, message = FALSE}
+# COMBINING DATA ABOUT HAIR SAMPLES AND SNARE CHECKS WITH VIDEO DATA
+# DATE SD CARD COLLECTED IS NOT THE SAME AS DATE SNARE CHECKED NECESSARILY
+# changing column names so they match with video column names
+colnames(snare_check_new)[2] <- "date.hair.collected"
+# adding time to video date sd card was collected to match summary_snares
+videos$date.sd.card.collected.time <- paste(videos$date.sd.card.collected, "11:59")
+videos$date.sd.card.collected.time <- ymd_hm(videos$date.sd.card.collected.time)
+
+# merging all possibilities
+merged <- merge(videos, snare_check_new, by = "hair.snare.id", all=TRUE)
+
+# filtering out ones that don't make sense
+# creating column that tells us if the videos recorded are in range of when the hair snare was checked
+merged$videos_within_range <- with(merged, 
+                            date.time.video.recorded >= start.time.period.sample.and.videos &
+                              date.time.video.recorded < date.hair.collected)
+
+merged %>% group_by(hair.snare.id, date.hair.collected, videos_within_range) %>% 
+  summarize(n=n())
+
+# filtering rows where the videos weren't taken in the time when the snares were checked
+# if videos weren't taken at the times between checks they are NA so we can just get rid of the FALSE columns 
+merged.1 <- merged %>% filter(videos_within_range != FALSE) # this also gets rid of NAs
+
+# checking that it worked
+merged.1 %>% group_by(hair.snare.id, date.hair.collected) %>% summarize(n=n())
+
+videos_hair_all<-merged.1
+
+# THIS DATA ONLY INCLUDES TIMES WHEN VIDEOS WERE RECORDED
+```
+
+##### Merging video and hair data (videos_hair_all) with hair snare database
+
+```{r, warning=FALSE, message = FALSE}
+# selecting only the columns we need from the hair snare database
+snare_database_1 <- select(snare_database,
+                           hair.snare.id,
+                           northing, easting,
+                           date.deployed, date.collected, number.of.days.deployed,
+                           date.trail.camera.deployed, date.trail.camera.collected,
+                           number.of.days.camera.deployed, days.camera.per.days.snare.deployed,
+                           beaver.feature, brushes,
+                           n_videos, n.videos.beavers,
+                           total.snags, snags.per.camera.days,
+                           n.beaver.snag, n.muskrat.snag,
+                           percent.muskrat.snag, otter_snag)
+
+# merging 
+videos_hair_all <- merge(videos_hair_all, snare_database_1, by="hair.snare.id")
+```
+
+##### Visualizing data
+
+```{r, warning=FALSE, message = FALSE}
+(plot <- videos_hair_all %>% 
+  mutate(month.video.recorded = format(date.time.video.recorded, "%m %d %H:%M")) %>%
+    ggplot(aes(x=month.video.recorded, y=hair.snare.id)) +
+    scale_x_discrete(labels = function(x) format(as.Date(x, "%m %d %H:%M"), "%m")) +
+    geom_point() +
+    geom_point(data=snare_check, 
+               aes(x= format(date.checked, "%m %d %H:%M"), 
+                   y=hair.snare.id,
+                   col = hair.on.snare,
+                   alpha = 0.75)) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))) 
+```
+
+### Models
+
+##### Getting data ready for model
+
+```{r, warning=FALSE, message = FALSE}
+# figuring out which columns are which
+column_indices <- seq_along(names(videos_hair_all))
+# Print the column names along with their indices
+for (i in column_indices) {
+  cat("Column", i, ":", names(videos_hair_all)[i], "\n")
+}
+
+# re-naming some columns so they make more sense
+videos_hair_all <- videos_hair_all %>% rename(date.snare.deployed = date.deployed)
+videos_hair_all <- videos_hair_all %>% rename(date.snare.collected = date.collected)
+videos_hair_all <- videos_hair_all %>% rename(number.of.days.snare.deployed = number.of.days.deployed)
+
+# converting all numeric columns to numeric
+videos_hair_all <- videos_hair_all %>%
+  mutate_at(vars(max.number.of.individuals, min.number.of.individuals, min.number.of.individuals ,  max.number.of.adults ,
+     max.number.of.neonates , max.number.of.females ,  max.number.of.males ,
+     max.number.of.unk.sex , snag.snare , number.of.times.snag.snare , snout.sampled ,
+     head.sampled , neck.sampled , back.sampled , side.sampled , belly.sampled ,
+     legs.sampled , rump.sampled , tail.sampled , beaver.travel.inhibited.by.snare ,
+     dirt.score , entire.sample.weight.mg , number.of.guard.hairs , follicle.present ,
+     days.between.checks , animal.videos.recorded.on.camera , sample.collected ,
+     sample.recorded.on.video , number.of.days.snare.deployed , brushes ,
+     number.of.days.camera.deployed , days.camera.per.days.snare.deployed ,
+     n_videos , n.videos.beavers ,
+     total.snags , snags.per.camera.days , n.beaver.snag ,
+     n.muskrat.snag , percent.muskrat.snag , otter_snag), as.numeric)
+
+# filtering videos for beaver and grouping them by variables of interest, then summarizing the sum of number of individuals were captured, number of time adults and babies were captured, number of times individuals crossed the snare, and number of times each body part was snagged 
+# for all snares that had videos taken at them and the time periods that those videos were taken, this tells us if hair samples were collected
+hair.for.model <- videos_hair_all %>%
+  mutate(is_beaver = case_when(main.species == "beaver" ~ "beaver", TRUE ~ "other")) %>%
+  group_by(is_beaver, hair.snare.id, sample.id, entire.sample.weight.mg, 
+           sample.collected, dirt.score, date.hair.collected, days.between.checks, brushes,
+           beaver.feature) %>%
+  summarize(
+    n.max.ind = sum(max.number.of.individuals, na.rm = TRUE),
+    n.max.adults = sum(max.number.of.adults, na.rm = TRUE),
+    n.max.bb = sum(max.number.of.neonates, na.rm = TRUE),
+    n.crossed.snare = sum(number.of.times.snag.snare, na.rm = TRUE),
+    n.snout = sum(snout.sampled, na.rm = TRUE),
+    n.head = sum(head.sampled, na.rm = TRUE),
+    n.neck = sum(neck.sampled, na.rm = TRUE),
+    n.back = sum(back.sampled, na.rm = TRUE),
+    n.side = sum(side.sampled, na.rm = TRUE),
+    n.belly = sum(belly.sampled, na.rm = TRUE),
+    n.legs = sum(legs.sampled, na.rm = TRUE),
+    n.rump = sum(rump.sampled, na.rm = TRUE),
+    n.tail = sum(tail.sampled, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  pivot_wider(
+    names_from = is_beaver,
+    values_from = c(n.max.ind, n.max.adults, n.max.bb, n.crossed.snare, 
+                    n.snout, n.head, n.neck, n.back, n.side, n.belly, 
+                    n.legs, n.rump, n.tail),
+    names_glue = "{.value}_{is_beaver}"
+  )
+
+# Camera got ruined by blackbear (snare_08)
+hair.for.model <- hair.for.model %>% filter(hair.snare.id != "snare_08")
+                                                                                          
+# finding weight of sample / number of days sample could have been collected in
+hair.for.model <- hair.for.model %>% mutate(weight.by.day = entire.sample.weight.mg/days.between.checks)
+
+# removing sample hair_373 because it's missing
+hair.for.model <- hair.for.model %>% filter(sample.id != "hair_373")
+
+# replacing NAs with 0's
+hair.for.model$n.crossed.snare_beaver <- 
+  ifelse(is.na(hair.for.model$n.crossed.snare_beaver), 0, 
+         hair.for.model$n.crossed.snare_beaver)
+hair.for.model$n.crossed.snare_other <- 
+  ifelse(is.na(hair.for.model$n.crossed.snare_other), 0, 
+                           hair.for.model$n.crossed.snare_other)
+hair.for.model$n.snout_beaver[is.na(hair.for.model$n.snout_beaver)] <- 0
+hair.for.model$n.head_beaver[is.na(hair.for.model$n.head_beaver)] <- 0
+hair.for.model$n.neck_beaver[is.na(hair.for.model$n.neck_beaver)] <- 0
+hair.for.model$n.back_beaver[is.na(hair.for.model$n.back_beaver)] <- 0
+hair.for.model$n.side_beaver[is.na(hair.for.model$n.side_beaver)] <- 0
+hair.for.model$n.belly_beaver[is.na(hair.for.model$n.belly_beaver)] <- 0
+hair.for.model$n.legs_beaver[is.na(hair.for.model$n.legs_beaver)] <- 0
+hair.for.model$n.rump_beaver[is.na(hair.for.model$n.rump_beaver)] <- 0
+hair.for.model$n.tail_beaver[is.na(hair.for.model$n.tail_beaver)] <- 0
+```
+
+##### Model 1: What influences the likelihood of a sample being collected
+
+(For all sampling periods where videos were recorded at snares)
+
+hair sample collected \~ 
+
+brushes present + 
+
+beaver feature +
+
+number of times beavers snagged snare + 
+
+number of times non-beaver animals snagged snare
+
+###### Standardizing variables
+
+```{r, warning=FALSE, message = FALSE}
+# standardizing variables
+hair.for.model$days.between.checks.std.mod.1 <- (hair.for.model$days.between.checks - mean(hair.for.model$days.between.checks)) / sd(hair.for.model$days.between.checks)
+
+hair.for.model$n.crossed.snare_beaver.std.mod.1 <- (hair.for.model$n.crossed.snare_beaver - mean(hair.for.model$n.crossed.snare_beaver)) / sd(hair.for.model$n.crossed.snare_beaver)
+
+hair.for.model$n.crossed.snare_other.std.mod.1 <- (hair.for.model$n.crossed.snare_other - mean(hair.for.model$n.crossed.snare_other)) / sd(hair.for.model$n.crossed.snare_other)
+```
+
+###### Visualizing data
+
+```{r, warning=FALSE, message = FALSE}
+library(plotly)
+# brushes
+ggplotly(ggplot(hair.for.model, aes(x=brushes, y=sample.collected)) + theme_bw()+
+   geom_point(position = position_jitter(w = 2, h = 0.05), size=3) + 
+   stat_smooth(method="glm", method.args = list(family = "binomial"),
+               se=FALSE))
+
+# beavers crossed snare
+ggplotly(ggplot(hair.for.model, aes(x=n.crossed.snare_beaver.std.mod.1, y=sample.collected)) +
+           theme_bw()+
+   geom_point(position = position_jitter(w = 2, h = 0.05), size=3) + 
+   stat_smooth(method="glm", method.args = list(family = "binomial"),
+               se=FALSE))
+
+# other animals crossed snare
+ggplotly(ggplot(hair.for.model, aes(x=n.crossed.snare_other.std.mod.1, y=sample.collected)) + 
+           theme_bw()+
+   geom_point(position = position_jitter(w = 2, h = 0.05), size=3) + 
+   stat_smooth(method="glm", method.args = list(family = "binomial"),
+               se=FALSE))
+```
+
+###### Running model
+
+```{r, warning=FALSE, message = FALSE}
+# converting all variables to factor that are factors
+hair.for.model$sample.collected <- as.factor(hair.for.model$sample.collected)
+hair.for.model$brushes <- as.factor(hair.for.model$brushes)
+hair.for.model$beaver.feature <- as.factor(hair.for.model$beaver.feature)
+
+# running model
+model1 <- glm(sample.collected ~ 
+                brushes + 
+                beaver.feature +
+                #days.between.checks.std.mod.1 +
+                n.crossed.snare_beaver.std.mod.1 + 
+                n.crossed.snare_other.std.mod.1
+                , data = hair.for.model, family = binomial())
+
+# model summary
+summary(model1)
+
+# checking model assumptions
+library(ggResidpanel)
+resid_panel(model1)
+library(car)
+vif(model1)
+```
+
+##### Model 2: What influences the weight of samples collected?
+
+(For all sampling periods where a hair sample was collected with a dirt score of 0 and videos were recorded at snares)
+
+hair weight / sample days \~ 
+
+brushes present + 
+
+beaver feature + 
+
+number of times beavers snagged snares + 
+
+number of times non-beaver animals snagged snares
+
+###### Standardizing variables
+
+```{r, warning=FALSE, message = FALSE}
+# filtering for just samples with a dirt score of 0
+hair.for.model.dirt.0 <- hair.for.model %>% filter(dirt.score == 0)
+
+# standardizing variables
+hair.for.model.dirt.0$n.crossed.snare_beaver.std.mod.2 <- 
+  (hair.for.model.dirt.0$n.crossed.snare_beaver - mean(hair.for.model.dirt.0$n.crossed.snare_beaver)) / sd(hair.for.model.dirt.0$n.crossed.snare_beaver)
+
+hair.for.model.dirt.0$n.crossed.snare_other.std.mod.2 <- (hair.for.model.dirt.0$n.crossed.snare_other - mean(hair.for.model.dirt.0$n.crossed.snare_other)) / sd(hair.for.model.dirt.0$n.crossed.snare_other)
+```
+
+###### Visualizing data
+
+```{r, warning=FALSE, message = FALSE}
+# brushes
+ggplot(hair.for.model.dirt.0, aes(x=brushes, y=weight.by.day)) + geom_point() + geom_smooth()
+
+# beaver feature
+ggplot(hair.for.model.dirt.0, aes(x=beaver.feature, y=weight.by.day)) + geom_point() + geom_smooth()
+
+# number of times beavers crossed snare
+ggplot(hair.for.model.dirt.0, aes(x=n.crossed.snare_beaver.std.mod.2, y=weight.by.day)) + geom_point() + geom_smooth()
+
+# number of times other animals crossed snare
+ggplot(hair.for.model.dirt.0, aes(x=n.crossed.snare_other.std.mod.2, y=weight.by.day)) + geom_point() + geom_smooth()
+```
+
+###### Running model
+
+```{r, warning=FALSE, message = FALSE}
+# running model
+model2 <- lm(weight.by.day ~ 
+               brushes + 
+               beaver.feature + 
+               n.crossed.snare_beaver.std.mod.2 + 
+               n.crossed.snare_other.std.mod.2, 
+             data = hair.for.model.dirt.0)
+# summarizing model
+summary(model2)
+
+# checking model assumpations
+resid_panel(model2)
+vif(model2)
+```
+
+##### Model 3: Do certain areas of the beavers body leave more hair on the snare when snagged?
+
+(For all sampling periods where a hair sample was collected with a dirt score of 0 and videos were recorded at snares)
+
+\
+hair weight / sample days \~ 
+
+number of times back snagged +
+
+number of times belly snagged +
+
+number of times side snagged +
+
+number of times snout snagged +
+
+number of times tail snagged
+
+###### Standardizing variables
+
+```{r, warning=FALSE, message = FALSE}
+# combining back measurements
+hair.for.model.dirt.0$n.back.all_beaver <- 
+  hair.for.model.dirt.0$n.head_beaver + hair.for.model.dirt.0$n.neck_beaver +
+  hair.for.model.dirt.0$n.back_beaver + hair.for.model.dirt.0$n.rump_beaver
+
+# combining belly measurements
+hair.for.model.dirt.0$n.belly.all_beaver <-
+  hair.for.model.dirt.0$n.belly_beaver + hair.for.model.dirt.0$n.legs_beaver
+
+# standardizing variables
+# back
+hair.for.model.dirt.0$n.back.all_beaver.std.mod.3 <- 
+  (hair.for.model.dirt.0$n.back.all_beaver - 
+     mean(hair.for.model.dirt.0$n.back.all_beaver)) / 
+  sd(hair.for.model.dirt.0$n.back.all_beaver)
+
+# belly
+hair.for.model.dirt.0$n.belly.all_beaver.std.mod.3 <- 
+  (hair.for.model.dirt.0$n.belly.all_beaver - 
+     mean(hair.for.model.dirt.0$n.belly.all_beaver)) / 
+  sd(hair.for.model.dirt.0$n.belly.all_beaver)
+
+# snout
+hair.for.model.dirt.0$n.snout_beaver.std.mod.3 <- (hair.for.model.dirt.0$n.snout_beaver - mean(hair.for.model.dirt.0$n.snout_beaver)) / sd(hair.for.model.dirt.0$n.snout_beaver)
+
+# side
+hair.for.model.dirt.0$n.side_beaver.std.mod.3 <- (hair.for.model.dirt.0$n.side_beaver - mean(hair.for.model.dirt.0$n.side_beaver)) / sd(hair.for.model.dirt.0$n.side_beaver)
+
+# tail
+hair.for.model.dirt.0$n.tail_beaver.std.mod.3 <- (hair.for.model.dirt.0$n.tail_beaver - mean(hair.for.model.dirt.0$n.tail_beaver)) / sd(hair.for.model.dirt.0$n.tail_beaver)
+```
+
+###### Visualizing data
+
+```{r, warning=FALSE, message = FALSE}
+# snout
+ggplot(hair.for.model.dirt.0, 
+       aes(x=n.snout_beaver.std.mod.3, y=weight.by.day)) + geom_point() + geom_smooth()
+# side
+ggplot(hair.for.model.dirt.0, 
+       aes(x=n.side_beaver.std.mod.3, y=weight.by.day)) + geom_point() + geom_smooth()
+# tail
+ggplot(hair.for.model.dirt.0, 
+       aes(x=n.tail_beaver.std.mod.3, y=weight.by.day)) + geom_point() + geom_smooth()
+# back all 
+ggplot(hair.for.model.dirt.0, 
+       aes(x=n.back.all_beaver.std.mod.3, y=weight.by.day)) + geom_point() + geom_smooth()
+# belly all
+ggplot(hair.for.model.dirt.0, 
+       aes(x=n.belly.all_beaver.std.mod.3, y=weight.by.day)) + geom_point() + geom_smooth()
+```
+
+###### Running model
+
+```{r, warning=FALSE, message = FALSE}
+# running model
+model3 <- lm(weight.by.day ~ 
+               n.back.all_beaver.std.mod.3 + 
+               n.belly.all_beaver.std.mod.3 + 
+               n.snout_beaver.std.mod.3  +  
+               n.side_beaver.std.mod.3+ 
+               n.tail_beaver.std.mod.3, 
+             data = hair.for.model.dirt.0)
+
+# summary of model
+summary(model3)
+
+# checking model assumptions
+resid_panel(model3)
+vif(model3)
+```
