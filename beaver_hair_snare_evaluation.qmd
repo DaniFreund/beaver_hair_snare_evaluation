@@ -1,6 +1,6 @@
 ---
 title: "Evaluation of placement, efficiency, and animal behavioral response of non-invasive hair snares for wild North American beavers (Castor canadensis)"
-author: "Dani Freund"
+author: "Dani R. Freund"
 format: html
 editor: visual
 theme: lux
@@ -47,6 +47,8 @@ videos <- file.download("1eu4bubab8yKacRGzHgWQj6uJbg8rKjz06yKpkZybq9E")
 ### Converting Dates and Times to Usable Format
 
 ```{r, warning=FALSE, message = FALSE}
+#| results: hide
+
 # SNARE DATABASE
 snare_database$date.deployed <- as.Date(snare_database$date.deployed,format = "%m-%d-%Y")
 snare_database$date.collected <- as.Date(snare_database$date.collected,format = "%m-%d-%Y")
@@ -201,27 +203,29 @@ snare_database %>%
 
 ### Remote Camera Videos
 
-##### Beaver activity
-
-```{r}
+```{r, message = FALSE, warning = FALSE, echo=FALSE}
+#| results: hide
+# Beaver activity
 # looking at beaver activity at individual ponds
 # some videos recorded the wrong date
-for(i in unique(videos$hair.snare.id)) {
-  # Subset the data for each hair.snare.id and where the main.species is "beaver"
-  subset_data <- videos %>%
-    filter(hair.snare.id == i, main.species == "beaver")
-  # Create the plot
-  p <- ggplot(subset_data, aes(x = date.video.recorded, fill = main.behavior)) +
-    geom_bar() +
-    labs(title = paste("Hair Snare ID:", i))
-  # Print the plot
-  print(p)
-}
+# for(i in unique(videos$hair.snare.id)) {
+#   # Subset the data for each hair.snare.id and where the main.species is "beaver"
+#   subset_data <- videos %>%
+#     filter(hair.snare.id == i, main.species == "beaver")
+#   # Create the plot
+#   p <- ggplot(subset_data, aes(x = date.video.recorded, fill = main.behavior)) +
+#     geom_bar() +
+#     labs(title = paste("Hair Snare ID:", i))
+#   # Print the plot
+#   print(p)
+# }
 ```
 
-##### For wolf killing beaver paper
+##### 
 
-```{r}
+```{r, message = FALSE, warning = FALSE, echo=FALSE}
+#| results: hide
+# For wolf killing beaver paper
 # adding 1 to the number of days deployed to include the last day
 snare_database$number.of.days.deployed.1 <- (snare_database$number.of.days.deployed) + 1
 
@@ -270,7 +274,7 @@ for(i in unique(videos_trails_summary_filter_all_dates$hair.snare.id)) {
     geom_bar(stat="identity") +
     labs(title = paste("Hair Snare ID:", i))
   # Print the plot
-  print(p)
+  #print(p)
 }
 
 # just getting total videos
@@ -337,7 +341,7 @@ for(i in unique(high.beav.activity$hair.snare.id)) {
     geom_bar(stat="identity") +
     labs(title = paste("Hair Snare ID:", i))
   # Print the plot
-  print(p)
+  #print(p)
 }
 
 # finding average time between when beavers were captured with high beaver activity snares
@@ -810,7 +814,7 @@ summary(mod1)
 # figuring out if there are snares with no dirty samples
 hair.snare.zero <- hair %>% group_by(hair.snare.id) %>% summarize(mean.dirt = mean(dirt.score)) %>% mutate(no.dirt = ifelse(mean.dirt == 0, "yes", "no")) %>% filter(no.dirt == "yes")
 hair.snare.zero.id <- hair.snare.zero$hair.snare.id
-snare_database[snare_database$hair.snare.id %in% hair.snare.zero.id,]
+#snare_database[snare_database$hair.snare.id %in% hair.snare.zero.id,]
 
 # creating dataset for hair samples with a score of 0 for dirtiness
 hair.zero <- hair %>% filter(sample.type == "snare" & dirt.score == 0)
@@ -826,10 +830,10 @@ snare_database <- merge(snare_database, hair.zero.weight, by = "hair.snare.id")
 snare_database$clean.sample.weight.per.day <- snare_database$clean.sample.weight/snare_database$number.of.days.deployed
 
 # summarizing weight of sample collected per number of days snare deployed
-snare_database %>% summarize(mean = mean(clean.sample.weight.per.day, na.rm=T), 
-                             sd=sd(clean.sample.weight.per.day, na.rm=T), 
-                             min = min(clean.sample.weight.per.day, na.rm=T), 
-                             max = max(clean.sample.weight.per.day, na.rm=T))
+# snare_database %>% summarize(mean = mean(clean.sample.weight.per.day, na.rm=T), 
+                             # sd=sd(clean.sample.weight.per.day, na.rm=T), 
+                             # min = min(clean.sample.weight.per.day, na.rm=T), 
+                             # max = max(clean.sample.weight.per.day, na.rm=T))
 ```
 
 ##### Guard hairs
@@ -926,8 +930,8 @@ merged$videos_within_range <- with(merged,
                             date.time.video.recorded >= start.time.period.sample.and.videos &
                               date.time.video.recorded < date.hair.collected)
 
-merged %>% group_by(hair.snare.id, date.hair.collected, videos_within_range) %>% 
-  summarize(n=n())
+#merged %>% group_by(hair.snare.id, date.hair.collected, videos_within_range) %>% 
+  #summarize(n=n())
 
 # filtering rows where the videos weren't taken in the time when the snares were checked
 # if videos weren't taken at the times between checks they are NA so we can just get rid of the FALSE columns 
@@ -985,9 +989,9 @@ videos_hair_all <- merge(videos_hair_all, snare_database_1, by="hair.snare.id")
 # figuring out which columns are which
 column_indices <- seq_along(names(videos_hair_all))
 # Print the column names along with their indices
-for (i in column_indices) {
-  cat("Column", i, ":", names(videos_hair_all)[i], "\n")
-}
+# for (i in column_indices) {
+#   cat("Column", i, ":", names(videos_hair_all)[i], "\n")
+# }
 
 # re-naming some columns so they make more sense
 videos_hair_all <- videos_hair_all %>% rename(date.snare.deployed = date.deployed)
@@ -1134,21 +1138,8 @@ model1 <- glm(sample.collected ~
                 n.crossed.snare_other.std.mod.1
                 , data = hair.for.model, family = binomial())
 
-# random intercept for pond
-library(lme4)
-mod1 <- lme4::glmer(sample.collected ~ 
-                brushes + 
-                beaver.feature +
-                #days.between.checks.std.mod.1 +
-                n.crossed.snare_beaver.std.mod.1 + 
-                n.crossed.snare_other.std.mod.1 + (1|hair.snare.id), 
-                data = hair.for.model,
-            family = binomial(),
-            control = glmerControl(optimizer = "bobyqa"))
-
 # model summary
 summary(model1)
-summary(mod1)
 
 # checking model assumptions
 library(ggResidpanel)
@@ -1211,18 +1202,8 @@ model2 <- lm(weight.by.day ~
                n.crossed.snare_other.std.mod.2, 
              data = hair.for.model.dirt.0)
 
-# random intercept
-mod2 <- lme4::lmer(weight.by.day ~ 
-               brushes + 
-               beaver.feature + 
-               n.crossed.snare_beaver.std.mod.2 + 
-               n.crossed.snare_other.std.mod.2 +
-                 (1|hair.snare.id), 
-             data = hair.for.model.dirt.0)
-
 # summarizing model
 summary(model2)
-summary(mod2)
 
 # checking model assumpations
 resid_panel(model2)
@@ -1313,19 +1294,8 @@ model3 <- lm(weight.by.day ~
                n.tail_beaver.std.mod.3, 
              data = hair.for.model.dirt.0)
 
-# random intercept
-mod3 <- lme4::lmer(weight.by.day ~ 
-               n.back.all_beaver.std.mod.3 + 
-               n.belly.all_beaver.std.mod.3 + 
-               n.snout_beaver.std.mod.3  +  
-               n.side_beaver.std.mod.3+ 
-               n.tail_beaver.std.mod.3 +
-                 (1|hair.snare.id), 
-             data = hair.for.model.dirt.0)
-
 # summary of model
 summary(model3)
-summary(mod3)
 
 # checking model assumptions
 resid_panel(model3)
